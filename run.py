@@ -12,6 +12,10 @@ app = FastAPI(
 
 app.include_router(router)
 
+@app.get("/")
+async def root():
+    return {"message": "Welcome to Rytsense Chatbot with Lead Capturing System"}
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "message": "Lead Capture API is running."}
