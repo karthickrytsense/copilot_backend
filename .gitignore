@@ -1,0 +1,8 @@
+.env
+credentials.json
+__pycache__/
+*.pyc
+*.pyo
+.idea/
+log/
+.vercel/
