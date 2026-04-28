@@ -1,5 +1,6 @@
 import csv
 import os
+import json
 from typing import Dict, Any
 import gspread
 from google.oauth2.service_account import Credentials
@@ -27,7 +28,7 @@ def submit_lead(lead_data: Dict[str, Any]) -> str:
     - company: str
     - project_description: str
     """
-    file_path = "leads.csv"
+    file_path = "/tmp/leads.csv"
     headers = ["name", "email", "phone", "company", "project_description"]
     
     file_exists = os.path.isfile(file_path)
@@ -44,10 +45,12 @@ def submit_lead(lead_data: Dict[str, Any]) -> str:
             writer.writerow(row)
             
         # 2. Upload to Google Sheets if configured
-        if settings.GOOGLE_SHEET_ID and settings.GOOGLE_CREDENTIALS_FILE:
+        google_creds_raw = os.getenv("GOOGLE_CREDENTIALS")
+        if settings.GOOGLE_SHEET_ID and google_creds_raw:
             print("[Lead Capture] Uploading to Google Sheets...")
             scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-            creds = Credentials.from_service_account_file(settings.GOOGLE_CREDENTIALS_FILE, scopes=scopes)
+            creds_dict = json.loads(google_creds_raw)
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
             client = gspread.authorize(creds)
             
             sheet = client.open_by_key(settings.GOOGLE_SHEET_ID).sheet1
