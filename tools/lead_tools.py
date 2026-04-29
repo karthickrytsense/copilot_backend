@@ -2,6 +2,7 @@ import csv
 import os
 import json
 from typing import Dict, Any
+from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 from config import settings
@@ -29,18 +30,22 @@ def submit_lead(lead_data: Dict[str, Any]) -> str:
     - project_description: str
     """
     file_path = "/tmp/leads.csv"
-    headers = ["name", "email", "phone", "company", "project_description"]
-    
+    headers = ["name", "email", "phone", "company", "project_description", "date", "time"]
+
+    now = datetime.now()
+    lead_data["date"] = now.strftime("%Y-%m-%d")
+    lead_data["time"] = now.strftime("%H:%M:%S")
+
     file_exists = os.path.isfile(file_path)
-    
+
     try:
         # 1. First, always write to local CSV as a backup
         with open(file_path, mode="a", newline="", encoding="utf-8") as file:
             writer = csv.DictWriter(file, fieldnames=headers)
-            
+
             if not file_exists:
                 writer.writeheader()
-            
+
             row = {field: lead_data.get(field, "") for field in headers}
             writer.writerow(row)
             
@@ -53,13 +58,14 @@ def submit_lead(lead_data: Dict[str, Any]) -> str:
             creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
             client = gspread.authorize(creds)
             
-            sheet = client.open_by_key(settings.GOOGLE_SHEET_ID).sheet1
+            sheet = client.open_by_key(settings.GOOGLE_SHEET_ID).worksheet(settings.GOOGLE_SHEET_NAME)
             
             # Check if headers exist, if sheet is empty add them
             all_data = sheet.get_all_values()
             if not all_data:
                 _headers = [h.replace("_", " ").title() for h in headers]
                 sheet.append_row(_headers)
+
             
             # Append lead data
             row_values = [lead_data.get(field, "") for field in headers]
