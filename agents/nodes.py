@@ -159,7 +159,7 @@ def career_redirect_node(state: AgentState):
     print("*" * 30, "career_redirect_node")
     print("CURRENT STATE:", state)
     print("*" * 30)
-    return {"messages": [AIMessage(content=f"It sounds like you're interested in joining our team! Please visit our careers page at https://rytsensetech.com/company/career/ to see open positions. Best of luck!")]}
+    return {"messages": [AIMessage(content=f"It sounds like you're interested in joining our team! Please visit our [careers page](https://rytsensetech.com/company/career/) to see open positions. Best of luck!")]}
 
 def general_qa_node(state: AgentState):
     """Placeholder for RAG answers."""
