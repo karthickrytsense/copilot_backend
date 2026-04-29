@@ -82,5 +82,7 @@ def submit_lead(lead_data: Dict[str, Any]) -> str:
         return "Lead successfully submitted to the database."
 
     except Exception as e:
+        import traceback
         print(f"[Lead Capture] Error storing lead: {e}")
+        print(f"[Lead Capture] Full traceback: {traceback.format_exc()}")
         return "Failed to submit lead fully due to internal error."
