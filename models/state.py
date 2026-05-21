@@ -12,9 +12,22 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     response: str
+    show_calendar: bool = False
 
 class SessionResponse(BaseModel):
     session_id: str
+
+class BookMeetingRequest(BaseModel):
+    session_id: str
+    date: str        # YYYY-MM-DD
+    time: str        # HH:MM (24hr)
+    timezone: str    # IANA timezone e.g. "America/New_York"
+
+class BookMeetingResponse(BaseModel):
+    success: bool
+    message: str
+    event_link: str = ""
+    meet_link: str = ""
 
 #-----------------
 # State Models
@@ -34,3 +47,4 @@ class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     intent: str
     lead_info: LeadInfo
+    show_calendar: bool

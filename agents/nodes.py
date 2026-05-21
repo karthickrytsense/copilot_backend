@@ -85,17 +85,20 @@ def lead_collector_node(state: AgentState):
     
     # 1. Update our knowledge base using structured output
     update_prompt = f"""
-{PERSONA}
+You are extracting lead information from a conversation.
 
-You are currently collecting information for a new project lead.
-Extract any missing lead information from the conversation so far.
-Only extract information that is explicitly stated. If you are not sure, leave it as null/None.
-Current Lead Info known:
+Current Lead Info already known (do not overwrite with None):
 Name: {lead_info.name}
 Email: {lead_info.email}
 Phone: {lead_info.phone}
 Company: {lead_info.company}
 Project Description: {lead_info.project_description}
+
+Instructions:
+- Extract any NEW information from the conversation that fills a missing field.
+- For "name": extract the person's full name if they mention it. If they only mention a company name, do NOT use that as the name.
+- For "phone": extract any 10+ digit number as phone.
+- Only extract what is clearly stated. Leave unknown fields as null.
 """
     extractor_llm = llm.with_structured_output(LeadInfo)
     extracted_info = extractor_llm.invoke([SystemMessage(content=update_prompt)] + messages)
@@ -119,17 +122,25 @@ Project Description: {lead_info.project_description}
         return {"lead_info": merged_info} 
         
     # 2. Ask for the first missing field
+    next_field = missing_fields[0]
     ask_prompt = f"""
 {PERSONA}
 
 You are currently collecting information for a new project lead.
-We currently need the following information from the user: {', '.join(missing_fields)}.
-Ask the user conversationally for ONE of these missing pieces of information.
-Do not ask for everything at once. Keep it natural and polite.
+You MUST ask the user for their: **{next_field}**.
 
-Important:
-- Try to ask more about the Project information when you are asking for the **Project Description**
-- Examples: What is the Project is about, Who are all the target customers for the projcts, How many Users May use the project.
+Rules:
+- Ask ONLY for {next_field}. Do not ask for anything else.
+- Do NOT say "thank you", "we'll be in touch", or any closing statements.
+- Do NOT confirm or summarize what was already collected.
+- Keep it short, natural, and conversational — one sentence is enough.
+
+Special instructions per field:
+- name: Ask for their full name specifically. e.g. "Could I get your full name?"
+- email: Ask for their email address.
+- phone: Ask for their phone number.
+- company: Ask for their company name.
+- project_description: Ask about the project details — what it is about, who the target users are, and estimated scale.
 """
     response = llm.invoke([SystemMessage(content=ask_prompt)] + messages)
     return {"lead_info": merged_info, "messages": [response]}
@@ -145,13 +156,12 @@ def submit_node(state: AgentState):
     if lead_info:
         data = lead_info.model_dump()
         result_msg = submit_lead(data)
-        # We append a system confirmation message and CLEAR the state so they don't get trapped further!
         return {
-            "messages": [AIMessage(content=f"Thank you! Your information has been securely gathered. {result_msg} Our team will reach out soon!")],
+            "messages": [AIMessage(content="Thank you! Your information has been securely gathered. Would you like to schedule a meeting with our team? Please pick a date and time that works for you.")],
             "intent": "general",
-            "lead_info": LeadInfo() # Reset for the next time
+            "show_calendar": True
         }
-    return {"messages": [AIMessage(content="Something went wrong while submitting your info.")]}
+    return {"messages": [AIMessage(content="Something went wrong while submitting your info.")], "show_calendar": False}
 
 
 def career_redirect_node(state: AgentState):
