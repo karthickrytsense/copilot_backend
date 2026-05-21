@@ -70,6 +70,44 @@ Answer ONLY: yes or no
     return response.content.strip().lower() == "yes"
 
 
+def _extract_name_from_conversation(messages) -> str | None:
+    """Uses LLM to extract name from anywhere in the conversation."""
+    conversation = "\n".join([f"{m.type}: {m.content}" for m in messages])
+    prompt = f"""
+Extract the person's full name from this conversation.
+
+Look for patterns like:
+- "I'm John", "I am John Smith", "My name is John"
+- "This is John", "Hi, John here"
+- Name given directly when asked
+
+Conversation:
+{conversation}
+
+Rules:
+- Return ONLY the name, nothing else.
+- Do NOT return company names.
+- If no name is found, return the word: null
+"""
+    response = llm.invoke([SystemMessage(content=prompt)])
+    result = response.content.strip()
+    return None if result.lower() == "null" or not result else result
+
+
+def _is_project_description_valid(description: str) -> bool:
+    """Checks if project description has enough detail."""
+    if not description:
+        return False
+    vague_phrases = [
+        "interested in", "want to do a project", "need help",
+        "looking for", "want to build something", "project with rytsense"
+    ]
+    desc_lower = description.lower()
+    if any(phrase in desc_lower for phrase in vague_phrases):
+        return False
+    return len(description.split()) >= 10
+
+
 def lead_collector_node(state: AgentState):
     """Analyzes missing fields and asks the user for the next piece of info."""
     print("*" * 30, "lead_collector_node")
@@ -79,11 +117,26 @@ def lead_collector_node(state: AgentState):
     lead_info = state.get("lead_info", LeadInfo())
     if lead_info is None:
         lead_info = LeadInfo()
-    
+
     required = get_lead_requirements()
-    missing_fields = []
-    
-    # 1. Update our knowledge base using structured output
+
+    last_bot_message = next(
+        (m.content for m in reversed(messages) if m.type == "ai"), ""
+    )
+    last_user_message = messages[-1].content.strip() if messages else ""
+
+    # 1. Direct mapping only for project_description
+    # When the bot asked for project details, directly store the user's reply
+    project_desc_keywords = ["about your project", "more about your project", "tell me more"]
+    direct_project_desc = None
+    if (
+        not lead_info.project_description
+        and any(kw in last_bot_message.lower() for kw in project_desc_keywords)
+        and last_user_message
+    ):
+        direct_project_desc = last_user_message
+
+    # 2. LLM extraction for all other fields
     update_prompt = f"""
 You are extracting lead information from a conversation.
 
@@ -96,54 +149,55 @@ Project Description: {lead_info.project_description}
 
 Instructions:
 - Extract any NEW information from the conversation that fills a missing field.
-- For "name": extract the person's full name if they mention it. If they only mention a company name, do NOT use that as the name.
+- For "name": extract the person's full name if they mention it. Do NOT use company name as name.
 - For "phone": extract any 10+ digit number as phone.
+- For "project_description": extract any description of the project the user mentions.
 - Only extract what is clearly stated. Leave unknown fields as null.
 """
     extractor_llm = llm.with_structured_output(LeadInfo)
     extracted_info = extractor_llm.invoke([SystemMessage(content=update_prompt)] + messages)
-    
-    # The LLM may only extract new things and return None for old fields, so we MUST merge.
+
+    # 3. Merge — direct_project_desc is the final fallback for project_description
     merged_info = LeadInfo(
         name=extracted_info.name or lead_info.name,
         email=extracted_info.email or lead_info.email,
         phone=extracted_info.phone or lead_info.phone,
         company=extracted_info.company or lead_info.company,
-        project_description=extracted_info.project_description or lead_info.project_description
+        project_description=extracted_info.project_description or lead_info.project_description or direct_project_desc,
     )
 
-    # Calculate what's still missing from the new state
-    for field in required:
-        if not getattr(merged_info, field):
-            missing_fields.append(field)
-            
+    # 5. If name still missing, try dedicated name extraction from full conversation
+    if not merged_info.name:
+        extracted_name = _extract_name_from_conversation(messages)
+        if extracted_name:
+            merged_info = LeadInfo(
+                name=extracted_name,
+                email=merged_info.email,
+                phone=merged_info.phone,
+                company=merged_info.company,
+                project_description=merged_info.project_description,
+            )
+
+    # 6. Calculate missing fields
+    missing_fields = [field for field in required if not getattr(merged_info, field)]
+
     if not missing_fields:
-        # Everything collected
-        return {"lead_info": merged_info} 
-        
-    # 2. Ask for the first missing field
+        return {"lead_info": merged_info}
+
+    # 7. Ask for the next missing field
     next_field = missing_fields[0]
-    ask_prompt = f"""
-{PERSONA}
-
-You are currently collecting information for a new project lead.
-You MUST ask the user for their: **{next_field}**.
-
-Rules:
-- Ask ONLY for {next_field}. Do not ask for anything else.
-- Do NOT say "thank you", "we'll be in touch", or any closing statements.
-- Do NOT confirm or summarize what was already collected.
-- Keep it short, natural, and conversational — one sentence is enough.
-
-Special instructions per field:
-- name: Ask for their full name specifically. e.g. "Could I get your full name?"
-- email: Ask for their email address.
-- phone: Ask for their phone number.
-- company: Ask for their company name.
-- project_description: Ask about the project details — what it is about, who the target users are, and estimated scale.
-"""
-    response = llm.invoke([SystemMessage(content=ask_prompt)] + messages)
-    return {"lead_info": merged_info, "messages": [response]}
+    field_questions = {
+        "name": "Could I get your full name, please?",
+        "email": "Could you share your email address so we can reach you?",
+        "phone": "Could I have your phone number, please?",
+        "company": "What is the name of your company?",
+        "project_description": (
+            "Could you tell me more about your project? "
+            "For example — what is it about, who are the target users, and what scale are you expecting?"
+        )
+    }
+    question = field_questions.get(next_field, f"Could you please provide your {next_field}?")
+    return {"lead_info": merged_info, "messages": [AIMessage(content=question)]}
 
 
 def submit_node(state: AgentState):
